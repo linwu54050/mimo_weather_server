@@ -189,6 +189,9 @@ async def main():
             server.create_initialization_options()
         )
 
-if __name__ == "__main__":
+def sync_main():
     import asyncio
     asyncio.run(main())
+
+if __name__ == "__main__":
+    sync_main()
