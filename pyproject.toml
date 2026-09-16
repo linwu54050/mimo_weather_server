@@ -9,7 +9,7 @@ dependencies = [
 ]
 
 [project.scripts]
-weather-server = "weather_server:main"
+weather-server = "weather_server:sync_main"
 
 [build-system]
 requires = ["setuptools>=61.0"]
