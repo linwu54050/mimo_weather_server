@@ -15,11 +15,23 @@ Weather MCP Server
 工具名	描述	参数
 gget_current_weather	查询指定城市的实时天气信息，包括温度、湿度、风力以及穿衣和运动建议	city (string, 必填)
 
+pip freeze > requirements.txt
+
 验证步骤：
 1 本机验证
-
 npx @modelcontextprotocol/inspector --config inspector.json
 
 
-
-pip freeze > requirements.txt
+2 traecode验证
+{
+  "mcpServers": {
+    "mimo_weather": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "git+https://github.com/linwu54050/mimo_weather_server.git",
+        "weather-server"
+      ]
+    }
+  }
+}
