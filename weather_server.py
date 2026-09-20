@@ -8,10 +8,6 @@ import sys
 sys.stdout.reconfigure(encoding="utf-8")
 sys.stderr.reconfigure(encoding="utf-8")
 
-import os, sys
-print(f"[DEBUG] KEY exists: {bool(os.getenv('QWEATHER_API_KEY'))}", file=sys.stderr)
-print(f"[DEBUG] HOST: {os.getenv('QWEATHER_API_HOST', '(none)')}", file=sys.stderr)
-
 # ============================================================
 # 配置
 # ============================================================
@@ -200,11 +196,12 @@ def get_current_weather(city: str, units: str = "metric") -> str:
 # 服务器启动
 # ============================================================
 
-if __name__ == "__main__":
+def sync_main() -> None:
+    """同步入口，供 pyproject.toml 的 [project.scripts] 调用。"""
     print("🌤️ 天气 MCP 服务器启动中...", file=sys.stderr)
     print(f"✅ API 已配置，Host: {BASE_URL}", file=sys.stderr)
-    print(f"💡 使用 mcp dev weather_server.py 进行调试", file=sys.stderr)
-
-    # 使用 stdio 传输（适合本地开发调试）
-    # 注：v2 中传输配置已移至 run() 方法，但 stdio 用法保持不变
     mcp.run(transport="stdio")
+
+
+if __name__ == "__main__":
+    sync_main()
