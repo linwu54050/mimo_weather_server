@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "weather": {
+      "command": "D:\\ai_learning\\mimo_weather_server\\venv\\Scripts\\python.exe",
+      "args": ["D:\\ai_learning\\mimo_weather_server\\weather_server.py"],
+      "env": {
+        "QWEATHER_API_KEY": "xxxxxxxx",
+        "QWEATHER_API_HOST": "https://m46r738ubk.re.qweatherapi.com"
+      }
+    }
+  }
+}

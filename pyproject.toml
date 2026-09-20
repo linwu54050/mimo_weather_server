@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "一个基于 MCP 协议的天气查询服务器"
 requires-python = ">=3.10"
 dependencies = [
-    "mcp==1.29.0",
+    "mcp==2.2.0",
     "requests==2.34.2"
 ]
 

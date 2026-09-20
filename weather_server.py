@@ -1,197 +1,210 @@
-from mcp.server import Server
-from mcp.types import Tool, TextContent, Resource
-from mcp.server.stdio import stdio_server
+import os
+import sys
 import requests
+from mcp.server import MCPServer
+from typing import Any
 
-# 创建服务器
-server = Server("weather-server")
+import sys
+sys.stdout.reconfigure(encoding="utf-8")
+sys.stderr.reconfigure(encoding="utf-8")
 
-# 模拟天气数据（实际项目请用真实 API）
-WEATHER_DATA = {
-    "北京": {"temp": 15, "humidity": 45, "weather": "晴", "wind": "北风3级"},
-    "上海": {"temp": 22, "humidity": 65, "weather": "多云", "wind": "东风2级"},
-    "广州": {"temp": 28, "humidity": 75, "weather": "阵雨", "wind": "南风3级"},
-    "深圳": {"temp": 27, "humidity": 80, "weather": "雷阵雨", "wind": "东南风4级"},
-    "杭州": {"temp": 20, "humidity": 55, "weather": "阴", "wind": "东北风2级"},
+import os, sys
+print(f"[DEBUG] KEY exists: {bool(os.getenv('QWEATHER_API_KEY'))}", file=sys.stderr)
+print(f"[DEBUG] HOST: {os.getenv('QWEATHER_API_HOST', '(none)')}", file=sys.stderr)
+
+# ============================================================
+# 配置
+# ============================================================
+
+API_KEY = os.getenv("QWEATHER_API_KEY", "")
+BASE_URL = os.getenv("QWEATHER_API_HOST", "https://m46r738ubk.re.qweatherapi.com")
+
+if not API_KEY:
+    print("❌ 错误：未设置 QWEATHER_API_KEY 环境变量", file=sys.stderr)
+    print("💡 请设置：export QWEATHER_API_KEY='你的密钥'", file=sys.stderr)
+    sys.exit(1)
+
+# 常用城市 LocationID 缓存
+CITY_ID_MAP = {
+    "北京": "101010100", "上海": "101020100",
+    "广州": "101280101", "深圳": "101280601",
+    "杭州": "101210101", "成都": "101270101",
+    "重庆": "101040100", "武汉": "101200101",
+    "西安": "101110101", "南京": "101190101",
 }
 
-# 获取穿衣指数
-def get_dressing_tip(temp):
-    if temp < 10:
-        return "建议穿毛衣、羽绒服等保暖衣物"
+# ============================================================
+# MCP 服务器实例
+# ============================================================
+
+mcp = MCPServer("weather-api-server")
+
+# ============================================================
+# 内部辅助函数（无变更）
+# ============================================================
+
+def _get_location_id(city: str) -> str | None:
+    """根据城市名返回 LocationID（先查本地表，再用 GeoAPI 兜底）"""
+    if city in CITY_ID_MAP:
+        return CITY_ID_MAP[city]
+
+    url = f"{BASE_URL}/geo/v2/city/lookup"
+    headers = {"X-QW-Api-Key": API_KEY}
+    try:
+        r = requests.get(url, headers=headers, params={"location": city}, timeout=10)
+        if r.status_code != 200:
+            print(f"GeoAPI 请求失败: {r.status_code}", file=sys.stderr)
+            return None
+        locs = r.json().get("location", [])
+        return locs[0]["id"] if locs else None
+    except Exception as e:
+        print(f"GeoAPI 异常: {e}", file=sys.stderr)
+        return None
+
+
+def _fetch_weather(city: str) -> dict[str, Any] | None:
+    """调用和风天气 API 获取当前天气"""
+    location_id = _get_location_id(city)
+    if not location_id:
+        print(f"未找到城市 '{city}' 的 LocationID", file=sys.stderr)
+        return None
+
+    url = f"{BASE_URL}/v7/weather/now"
+    headers = {"X-QW-Api-Key": API_KEY}
+
+    print("call _fetch_weather()", file=sys.stderr)
+
+    try:
+        r = requests.get(url, headers=headers, params={"location": location_id}, timeout=15)
+        if r.status_code == 401:
+            print("QWeather API Key 无效", file=sys.stderr)
+            return None
+        if r.status_code == 403:
+            print("QWeather Host 或 Key 不匹配", file=sys.stderr)
+            return None
+        if r.status_code != 200:
+            print(f"API 请求失败: {r.status_code}", file=sys.stderr)
+            return None
+
+        data = r.json()
+        if data.get("code") != "200":
+            print(f"接口返回错误码: {data.get('code')}", file=sys.stderr)
+            return None
+
+        now = data["now"]
+        return {
+            "city": city,
+            "temp": float(now["temp"]),
+            "feels_like": float(now["feelsLike"]),
+            "humidity": int(now["humidity"]),
+            "weather": now["text"],
+            "wind_speed": float(now["windSpeed"]),
+            "wind_deg": int(now["wind360"]),
+            "pressure": int(now["pressure"]),
+            "visibility": int(now["vis"]),
+        }
+    except requests.exceptions.Timeout:
+        print("API 请求超时", file=sys.stderr)
+        return None
+    except Exception as e:
+        print(f"未知错误: {e}", file=sys.stderr)
+        return None
+
+
+def _dressing_advice(temp: float) -> str:
+    """根据温度给出穿衣建议"""
+    if temp < 0:
+        return "极寒，建议穿羽绒服、棉服等极保暖衣物，帽子围巾手套缺一不可"
+    elif temp < 10:
+        return "寒冷，建议穿毛衣、厚外套、羽绒服等保暖衣物"
+    elif temp < 15:
+        return "较凉，建议穿外套、薄毛衣、卫衣等春秋装"
     elif temp < 20:
-        return "建议穿外套、衬衫等春秋装"
+        return "凉爽，建议穿长袖衬衫、薄外套、牛仔裤等"
+    elif temp < 25:
+        return "舒适，建议穿短袖、长裤、薄外套等春秋装"
+    elif temp < 30:
+        return "温暖，建议穿短袖、薄裤、防晒衣等夏季服装"
     else:
-        return "建议穿短袖、薄衫等夏季服装"
+        return "炎热，建议穿短袖短裤，注意防暑降温"
 
-# 获取运动建议
-def get_sport_tip(weather):
-    if weather in ["晴", "多云"]:
-        return "适合户外运动"
-    elif weather in ["小雨", "中雨"]:
-        return "不建议户外运动，可以室内锻炼"
+
+def _exercise_advice(weather: str, wind_speed: float) -> str:
+    """根据天气给出运动建议"""
+    if weather in ["雷阵雨", "雷雨", "暴风雨"]:
+        return "⚠️ 不建议户外运动，建议室内锻炼"
+    elif "雨" in weather:
+        return "🌧️ 不适合户外运动，可以在家做室内运动"
+    elif "雪" in weather:
+        return "❄️ 注意路滑，可以室内运动或玩雪"
+    elif wind_speed > 10:
+        return "💨 风力较大，不建议户外运动"
+    elif weather in ["晴", "多云", "阴"]:
+        return "✅ 适合户外运动，但请注意防晒和补水"
     else:
-        return "天气不佳，建议室内运动"
+        return "✅ 天气适宜，可以适当户外运动"
 
-# 列出所有工具
-@server.list_tools()
-async def list_tools():
-    return [
-        Tool(
-            name="get_weather",
-            description="查询指定城市的实时天气信息，包括温度、湿度、风力、"
-                        "以及穿衣和运动建议。支持北京、上海、深圳、杭州等城市。"
-                        "当用户询问天气时，优先使用此工具，不要使用网络搜索。",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "city": {
-                        "type": "string",
-                        "description": "城市名称（支持：北京、上海、广州、深圳、杭州等）"
-                    }
-                },
-                "required": ["city"]
-            }
-        ),
-        Tool(
-            name="get_forecast",
-            description="获取指定城市未来天气预报",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "city": {
-                        "type": "string",
-                        "description": "城市名称"
-                    },
-                    "days": {
-                        "type": "number",
-                        "description": "预报天数（1-7天）",
-                        "minimum": 1,
-                        "maximum": 7,
-                        "default": 3
-                    }
-                },
-                "required": ["city"]
-            }
-        )
-    ]
 
-# 处理工具调用
-@server.call_tool()
-async def call_tool(name: str, arguments: dict):
-    city = arguments.get("city", "")
-    days = arguments.get("days", 3)
-    
-    # 标准化城市名称
+# ============================================================
+# MCP 工具定义（装饰器 API 在 v2 中完全兼容）
+# ============================================================
+
+@mcp.tool()
+def get_current_weather(city: str, units: str = "metric") -> str:
+    """
+    获取指定城市的当前天气信息，包括温度、湿度、风力等详细数据。
+
+    Args:
+        city: 城市名称（支持中文或英文，例如：北京、Shanghai）
+        units: 温度单位，metric（摄氏度，默认）或 imperial（华氏度）
+
+    Returns:
+        格式化的天气报告文本
+    """
     city = city.strip()
-    
-    if name == "get_weather":
-        if city not in WEATHER_DATA:
-            available = "、".join(WEATHER_DATA.keys())
-            return [TextContent(
-                type="text",
-                text=f"抱歉，暂不支持查询「{city}」的天气。\n目前支持的城市有：{available}"
-            )]
-        
-        weather = WEATHER_DATA[city]
-        tip = get_dressing_tip(weather["temp"])
-        sport = get_sport_tip(weather["weather"])
-        
-        result = f"""
-🌤️  {city}当前天气
-━━━━━━━━━━━━━━
-🌡️ 温度：{weather['temp']}°C
+    if not city:
+        return "❌ 错误：请提供城市名称"
+
+    weather = _fetch_weather(city)
+    if not weather:
+        return (
+            f"❌ 无法获取「{city}」的天气数据。\n\n"
+            f"请确认：\n"
+            f"• 城市名称是否正确\n"
+            f"• API Key 是否有效\n"
+            f"• 网络连接是否正常"
+        )
+
+    temp_unit = "°C" if units == "metric" else "°F"
+    dressing = _dressing_advice(weather.get("temp", 20))
+    exercise = _exercise_advice(
+        weather.get("weather", "未知"),
+        weather.get("wind_speed", 0)
+    )
+
+    return f"""
+🌤️ 【{city}】实时天气
+━━━━━━━━━━━━━━━━━━━━━━━━━
+🌡️ 温度：{weather['temp']}{temp_unit}（体感 {weather['feels_like']}{temp_unit}）
 💧 湿度：{weather['humidity']}%
+🌬️ 风力：{weather['wind_speed']} km/h
 ☁️ 天气：{weather['weather']}
-🌬️ 风力：{weather['wind']}
-━━━━━━━━━━━━━━
-👔 穿衣建议：{tip}
-🏃 运动建议：{sport}
+🌅 能见度：{weather['visibility']} km
+━━━━━━━━━━━━━━━━━━━━━━━━━
+👔 {dressing}
+🏃 {exercise}
 """.strip()
-        
-        return [TextContent(type="text", text=result)]
-    
-    elif name == "get_forecast":
-        if city not in WEATHER_DATA:
-            available = "、".join(WEATHER_DATA.keys())
-            return [TextContent(
-                type="text",
-                text=f"抱歉，暂不支持查询「{city}」的天气。\n目前支持的城市有：{available}"
-            )]
-        
-        # 生成模拟预报
-        forecast = []
-        weather_list = ["晴", "多云", "阴", "小雨", "晴"]
-        temp_list = [18, 20, 15, 22, 25]
-        
-        result = f"📅 {city}未来{days}天天气预报\n━━━━━━━━━━━━━━\n"
-        
-        for i in range(min(days, 5)):
-            day_name = f"第{i+1}天"
-            w = weather_list[i % len(weather_list)]
-            t = temp_list[i % len(temp_list)]
-            result += f"{day_name}：{w}，{t}°C\n"
-        
-        result += "━━━━━━━━━━━━━━\n⚠️ 注：预报数据为模拟数据，仅供演示"
-        
-        return [TextContent(type="text", text=result)]
-    
-    raise ValueError(f"Unknown tool: {name}")
 
-# 列出所有资源
-@server.list_resources()
-async def list_resources():
-    return [
-        Resource(
-            uri="weather://tips",
-            name="weather_tips",
-            description="天气相关生活提示",
-            mimeType="text/plain"
-        )
-    ]
 
-# 读取资源
-@server.read_resource()
-async def read_resource(uri: str):
-    if uri == "weather://tips":
-        return """
-🌤️ 天气生活小贴士
-
-1️⃣ 穿衣指数
-• 温度低于10°C：羽绒服、毛衣
-• 温度10-20°C：外套、衬衫
-• 温度20°C以上：短袖、薄衫
-
-2️⃣ 运动建议
-• 晴天/多云：适合户外运动
-• 阴天/小雨：室内锻炼更合适
-• 雨天/雪天：避免户外运动
-
-3️⃣ 出行建议
-• 雾霾天：戴口罩，减少户外活动
-• 高温天：多喝水，避免中暑
-• 雨天：带伞，注意路滑
-
-4️⃣ 健康提示
-• 换季时注意增减衣物
-• 雨天湿气重，注意祛湿
-• 晴天紫外线强，注意防晒
-""".strip()
-    
-    raise ValueError(f"Unknown resource: {uri}")
-
-# 启动服务器
-async def main():
-    async with stdio_server() as (read_stream, write_stream):
-        await server.run(
-            read_stream,
-            write_stream,
-            server.create_initialization_options()
-        )
-
-def sync_main():
-    import asyncio
-    asyncio.run(main())
+# ============================================================
+# 服务器启动
+# ============================================================
 
 if __name__ == "__main__":
-    sync_main()
+    print("🌤️ 天气 MCP 服务器启动中...", file=sys.stderr)
+    print(f"✅ API 已配置，Host: {BASE_URL}", file=sys.stderr)
+    print(f"💡 使用 mcp dev weather_server.py 进行调试", file=sys.stderr)
+
+    # 使用 stdio 传输（适合本地开发调试）
+    # 注：v2 中传输配置已移至 run() 方法，但 stdio 用法保持不变
+    mcp.run(transport="stdio")

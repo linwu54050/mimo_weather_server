@@ -2,9 +2,14 @@ venv/
 .venv/
 env/
 
+my_inspector.json
+test.py
+requirements.tx
+
 # Python 缓存
 __pycache__/
 *.pyc
 
 # 日志和临时文件
 *.log
+
